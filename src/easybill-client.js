@@ -3,9 +3,10 @@ import fs from "fs/promises";
 import path from "path";
 
 export class EasybillClient {
-  constructor(apiKey) {
+  constructor(apiKey, logger = null) {
     this.apiKey = apiKey;
     this.baseURL = "https://api.easybill.de/rest/v1";
+    this.logger = logger;
     this.client = axios.create({
       baseURL: this.baseURL,
       headers: {
@@ -13,6 +14,42 @@ export class EasybillClient {
         "Content-Type": "application/json",
       },
     });
+  }
+
+  /**
+   * Warte bei Rate-Limit Fehlern
+   * @param {number} seconds - Anzahl Sekunden zu warten
+   */
+  async waitForRateLimit(seconds = 6) {
+    console.log(`⏳ Rate-Limit erreicht, warte ${seconds} Sekunden...`);
+    return new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+  }
+
+  /**
+   * API-Request mit Rate-Limit Handling
+   * @param {Function} requestFn - Die Request-Funktion
+   * @param {number} maxRetries - Maximale Anzahl Wiederholungen
+   * @returns {Promise} Response
+   */
+  async apiRequestWithRetry(requestFn, maxRetries = 3) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await requestFn();
+      } catch (error) {
+        if (error.response?.status === 429 && attempt < maxRetries) {
+          if (this.logger) {
+            this.logger.logRateLimit(attempt, maxRetries, 6);
+          }
+          console.log(
+            `💥 Rate-Limit Fehler (Versuch ${attempt}/${maxRetries})`
+          );
+          await this.waitForRateLimit(6);
+          console.log(`🔄 Wiederhole Request...`);
+          continue;
+        }
+        throw error;
+      }
+    }
   }
 
   /**
@@ -26,13 +63,15 @@ export class EasybillClient {
 
       // Erste Anfrage mit limit=1 um nur die Gesamtzahl der Seiten zu ermitteln
       console.log(`📊 Ermittle Gesamtzahl der Seiten...`);
-      const initialResponse = await this.client.get("/documents", {
-        params: {
-          type: "INVOICE",
-          limit: 100, // Nur 1 Item für Seiteninfo
-          is_draft: 0, // Nur finale Rechnungen
-        },
-      });
+      const initialResponse = await this.apiRequestWithRetry(() =>
+        this.client.get("/documents", {
+          params: {
+            type: "INVOICE",
+            limit: 100,
+            is_draft: 0,
+          },
+        })
+      );
 
       const totalPages = initialResponse.data.pages;
       const totalItems = initialResponse.data.total;
@@ -41,7 +80,7 @@ export class EasybillClient {
       );
 
       // Berechne die letzten 10 Seiten (oder weniger wenn weniger als 10 vorhanden)
-      const pagesToSearch = Math.min(10, totalPages);
+      const pagesToSearch = Math.min(20, totalPages);
       const startPage = Math.max(1, totalPages - pagesToSearch + 1);
 
       console.log(`🔍 Durchsuche Seiten ${startPage} bis ${totalPages}`);
@@ -50,14 +89,16 @@ export class EasybillClient {
       for (let page = totalPages; page >= startPage; page--) {
         console.log(`📄 Durchsuche Seite ${page}...`);
 
-        const response = await this.client.get("/documents", {
-          params: {
-            type: "INVOICE",
-            limit: 100, // Standard Limit für gute Performance (250ms)
-            page: page,
-            is_draft: 0,
-          },
-        });
+        const response = await this.apiRequestWithRetry(() =>
+          this.client.get("/documents", {
+            params: {
+              type: "INVOICE",
+              limit: 100,
+              page: page,
+              is_draft: 0,
+            },
+          })
+        );
 
         const invoices = response.data.items || [];
 
@@ -117,7 +158,9 @@ export class EasybillClient {
       await fs.mkdir(downloadPath, { recursive: true });
 
       // Hole Rechnung Details für Dateinamen
-      const invoiceResponse = await this.client.get(`/documents/${invoiceId}`);
+      const invoiceResponse = await this.apiRequestWithRetry(() =>
+        this.client.get(`/documents/${invoiceId}`)
+      );
       const invoice = invoiceResponse.data;
       const fileName = `${invoice.order_number}.pdf`;
       const filePath = path.join(downloadPath, fileName);
@@ -133,9 +176,11 @@ export class EasybillClient {
 
       // Lade PDF herunter
       console.log(`⬇️ Lade PDF herunter: ${fileName}`);
-      const pdfResponse = await this.client.get(`/documents/${invoiceId}/pdf`, {
-        responseType: "arraybuffer",
-      });
+      const pdfResponse = await this.apiRequestWithRetry(() =>
+        this.client.get(`/documents/${invoiceId}/pdf`, {
+          responseType: "arraybuffer",
+        })
+      );
 
       // Speichere PDF
       await fs.writeFile(filePath, pdfResponse.data);
@@ -157,9 +202,11 @@ export class EasybillClient {
    */
   async testConnection() {
     try {
-      const response = await this.client.get("/customers", {
-        params: { limit: 1 },
-      });
+      const response = await this.apiRequestWithRetry(() =>
+        this.client.get("/customers", {
+          params: { limit: 1 },
+        })
+      );
       console.log("✅ API-Verbindung erfolgreich");
       return true;
     } catch (error) {

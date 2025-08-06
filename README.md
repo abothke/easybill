@@ -75,6 +75,19 @@ node src/index.js cache --clear
 node src/index.js test
 ```
 
+### Log-Verwaltung
+
+```bash
+# Die letzten 5 Ausführungen anzeigen
+npm run logs
+
+# Die letzten 10 Ausführungen anzeigen
+node src/index.js logs --list 10
+
+# Details einer spezifischen Ausführung
+node src/index.js logs --details execution-2025-08-06_14-30-25.log
+```
+
 ## Workflow für deine 10-15 Rechnungen/Tag
 
 ### Szenario 1: Einzelne Bestellung
@@ -115,9 +128,11 @@ easybill/
 ├── src/
 │   ├── index.js              # CLI Interface
 │   ├── easybill-client.js    # API Client
-│   └── cache-manager.js      # Cache-Verwaltung
+│   ├── cache-manager.js      # Cache-Verwaltung
+│   └── logger.js             # Session-Logging
 ├── cache/                    # Cache-Dateien
 ├── invoices/                 # Heruntergeladene PDFs
+├── logs/                     # Ausführungs-Logs
 ├── package.json
 ├── .env                      # Konfiguration
 └── README.md
@@ -140,6 +155,13 @@ easybill/
 - Prüfe Schreibweise der Bestellnummer
 - Stelle sicher, dass die Rechnung in Easybill existiert
 - Suche ohne Cache: `npm run find ORDER-123 --no-cache`
+- Prüfe die Logs: `npm run logs`
+
+### Debugging mit Logs
+
+- **Letzte Ausführungen:** `npm run logs`
+- **Detaillierte Fehleranalyse:** `node src/index.js logs --details <log-datei>`
+- **Logs zeigen alle Schritte:** API-Calls, Cache-Hits, Fehler mit Stack-Traces
 
 ## Performance
 
